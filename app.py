@@ -1,91 +1,39 @@
 import streamlit as st
-import qrcode
-from fpdf import FPDF
-from math import ceil
+import pyqrcode
+from io import BytesIO
 from PIL import Image
-import os
-import tempfile
+import cv2
+from pyzbar.pyzbar import decode
 
-# ส่วนหัวโปรแกรม
-st.title("📄 QR Code Generator to PDF")
-st.write("อัปโหลดไฟล์ .txt ที่มีรายการรหัส (ทีละบรรทัด) → โปรแกรมจะสร้าง QR Code PDF ให้คุณ")
+def generate_qr_code(data):
+    qr = pyqrcode.create(data)
+    buffer = BytesIO()
+    qr.png(buffer, scale=6)
+    buffer.seek(0)
+    return buffer
 
-# อัปโหลดไฟล์
-uploaded_file = st.file_uploader("อัปโหลดไฟล์ .txt", type=["txt"])
+def decode_qr_code(image):
+    img = Image.open(image)
+    frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    decoded_objects = decode(frame)
+    return [obj.data.decode('utf-8') for obj in decoded_objects]
 
-if uploaded_file is not None:
-    # อ่านรหัสจากไฟล์
-    content = uploaded_file.read().decode("utf-8")
-    ids = [line.strip() for line in content.splitlines() if line.strip().isdigit()]
+st.title("QR Code Generator and Scanner")
 
-    if len(ids) == 0:
-        st.error("❌ ไม่พบรหัสในไฟล์ (ต้องเป็นตัวเลขทีละบรรทัด)")
-    else:
-        st.success(f"✅ พบ {len(ids)} รหัส")
+option = st.radio("Choose an option", ["Generate QR Code", "Scan QR Code"])
 
-        if st.button("สร้าง PDF"):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                image_paths = []
+if option == "Generate QR Code":
+    data = st.text_input("Enter data to encode")
+    if data:
+        qr_image = generate_qr_code(data)
+        st.image(qr_image, caption="Generated QR Code", use_column_width=True)
+        st.download_button("Download QR Code", qr_image, "qrcode.png", "image/png")
 
-                # สร้าง QR Code
-                for id_code in ids:
-                    qr = qrcode.make(id_code)
-                    path = os.path.join(tmpdir, f"{id_code}.png")
-                    qr.save(path)
-                    image_paths.append((path, id_code))
-
-                # สร้าง PDF
-                pdf = FPDF()
-                pdf.set_auto_page_break(False)
-
-                cols, rows = 4, 5
-                qr_size = 40  # mm
-                x_margin, y_margin = 10, 10
-
-                cell_width = (210 - 2 * x_margin) / cols
-                cell_height = (297 - 2 * y_margin) / rows
-
-                for page in range(ceil(len(image_paths) / 20)):
-                    pdf.add_page()
-
-                    # วาดเส้นแนวตั้ง
-                    for i in range(cols + 1):
-                        x = x_margin + i * cell_width
-                        pdf.line(x, y_margin, x, 297 - y_margin)
-
-                    # วาดเส้นแนวนอน
-                    for j in range(rows + 1):
-                        y = y_margin + j * cell_height
-                        pdf.line(x_margin, y, 210 - x_margin, y)
-
-                    # วาง QR
-                    for i in range(20):
-                        index = page * 20 + i
-                        if index >= len(image_paths):
-                            break
-                        image_path, code = image_paths[index]
-
-                        col = i % cols
-                        row = i // cols
-                        x = x_margin + col * cell_width
-                        y = y_margin + row * cell_height
-
-                        qr_x = x + (cell_width - qr_size) / 2
-                        qr_y = y + (cell_height - qr_size) / 2 - 5
-
-                        pdf.image(image_path, x=qr_x, y=qr_y, w=qr_size, h=qr_size)
-
-                        pdf.set_xy(x, qr_y + qr_size + 2)
-                        pdf.set_font("Arial", size=8)
-                        pdf.cell(cell_width, 5, code, align='C')
-
-                output_file = os.path.join(tmpdir, "qr_codes.pdf")
-                pdf.output(output_file)
-
-                with open(output_file, "rb") as f:
-                    st.download_button(
-                        label="⬇️ ดาวน์โหลด PDF",
-                        data=f,
-                        file_name="qr_codes.pdf",
-                        mime="application/pdf"
-                    )
+elif option == "Scan QR Code":
+    uploaded_file = st.file_uploader("Upload an image with a QR code", type=["png", "jpg", "jpeg"])
+    if uploaded_file:
+        decoded_data = decode_qr_code(uploaded_file)
+        if decoded_data:
+            st.write("Decoded QR Code Data:", decoded_data)
+        else:
+            st.write("No QR code detected.")
